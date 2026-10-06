@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   changeCurrentUserPassword,
+  createSubscription,
   getCurrentUser,
   getUserChannelProfile,
   getWatchHistory,
