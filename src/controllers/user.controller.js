@@ -5,7 +5,7 @@ import { uploadOncloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
-
+import { subscription as Subscription } from "../models/subscription.model.js";
 
 const generateAccessAndRefreshToken = async (userId) => {
     try {
@@ -219,34 +219,51 @@ const updateAccountDetails = asyncHandler(async (req, res) =>{
 
 })
 
-const updateUserAvatar = asyncHandler(async (req, res) =>{
+const updateUserAvatar = asyncHandler(async (req, res) => {
+
     const avatarLocalPath = req.file?.path
-    if(!avatarLocalPath){
+
+    if (!avatarLocalPath) {
         throw new ApiError(400, "Avatar file is missing")
     }
-    const avatar = await uploadOncloudinary(avatarLocalPath)
 
-    if(!avatar.url){
-        throw new ApiError(400, "Error while uploading on avatar")
+    const user = await User.findById(req.user?._id)
+
+    if (!user) {
+        throw new ApiError(404, "User not found")
     }
 
-    const user = await User.findByIdAndUpdate(
-        req.user?._id,
-        {
-            $set:{
-                avatar: avatar.url
-            }
-        },
-        {returnDocument: "after"}
-    ).select("-password")
+    const oldAvatarPublicId = user.avatar?.public_id
+
+    const newAvatar = await uploadOncloudinary(avatarLocalPath)
+
+    if (!newAvatar?.url) {
+        throw new ApiError(400, "Error while uploading avatar")
+    }
+
+    user.avatar = {
+        url: newAvatar.url,
+        public_id: newAvatar.public_id
+    }
+
+    await user.save({ validateBeforeSave: false })
+
+    if (oldAvatarPublicId) {
+        await cloudinary.uploader.destroy(oldAvatarPublicId)
+    }
+
+    const updatedUser = await User.findById(user._id)
+        .select("-password -refreshToken")
 
     return res
-    .status(200)
-    .json(new ApiResponse(200, user,"Avatar Updated Successfully"))
-
-
-
-
+        .status(200)
+        .json(
+            new ApiResponse(
+                200,
+                updatedUser,
+                "Avatar updated successfully"
+            )
+        )
 })
 
 const updateUserCoverImage = asyncHandler(async (req, res) =>{
@@ -254,27 +271,32 @@ const updateUserCoverImage = asyncHandler(async (req, res) =>{
     if(!coverImageLocalPath){
         throw new ApiError(400, "Avatar file is missing")
     }
-    const coverImage = await uploadOncloudinary(coverImageLocalPath)
 
-    if(!coverImage.url){
+    const user = await User.findById(req.user?._id)
+    const oldCoverImagePublicID = user.coverImage?.public_id
+    const newcoverImage = await uploadOncloudinary(coverImageLocalPath)
+
+    if(!newcoverImage.url){
         throw new ApiError(400, "Error while uploading on CoverImage")
     }
 
-    const user = await User.findByIdAndUpdate(
-        req.user?._id,
-        {
-            $set:{
-                coverImage: coverImage.url
-            }
-        },
-        {returnDocument: "after"}
-    ).select("-password")
+    user.coverImage = {
+        url: newcoverImage.url,
+        public_id: newcoverImage.public_id
+    }
+
+    await user.save({validateBeforeSave: false})
+
+    if(oldCoverImagePublicID){
+        await cloudinary.uploader.destroy(oldCoverImagePublicID)
+    }
+
+    const updatedUser = await User.findById(user?._id).select("-password -refreshToken")
+
 
     return res
     .status(200)
-    .json(new ApiResponse(200, user,"CoverImage Updated Successfully"))
-
-
+    .json(new ApiResponse(200, updatedUser,"CoverImage Updated Successfully"))
 
 })
 
@@ -404,6 +426,41 @@ const getWatchHistory = asyncHandler(async (req, res) =>{
 
 })
 
+const createSubscription = asyncHandler(async (req, res) => {
+  const { channelId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(channelId)) {
+    throw new ApiError(400, "Invalid channel ID");
+  }
+
+  if (req.user._id.toString() === channelId) {
+    throw new ApiError(400, "You cannot subscribe to yourself");
+  }
+
+  const channelExists = await User.exists({ _id: channelId });
+  if (!channelExists) {
+    throw new ApiError(404, "Channel not found");
+  }
+
+  const existingSubscription = await Subscription.findOne({
+    subscriber: req.user._id,
+    channel: channelId,
+  });
+
+  if (existingSubscription) {
+    throw new ApiError(409, "Already subscribed to this channel");
+  }
+
+  const createdSubscription = await Subscription.create({
+    subscriber: req.user._id,
+    channel: channelId,
+  });
+
+  return res
+    .status(201)
+    .json(new ApiResponse(201, createdSubscription, "Subscribed successfully"));
+});
+
 export { registerUser, 
          loginUser, 
          logoutUser, 
@@ -414,5 +471,6 @@ export { registerUser,
          updateUserAvatar,
          updateUserCoverImage,
          getUserChannelProfile,
-         getWatchHistory
+         getWatchHistory,
+         createSubscription
     }

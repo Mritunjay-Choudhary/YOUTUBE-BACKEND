@@ -55,4 +55,6 @@ router.route("/c/:username").get(verifyJWT, getUserChannelProfile);
 
 router.route("/history").get(verifyJWT, getWatchHistory);
 
+router.route("/:channelId/subscribe").post(verifyJWT, createSubscription);
+
 export default router;
